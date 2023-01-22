@@ -75,6 +75,7 @@ css_hide_progressbar = """
 .wrap .m-12::before { content:"Loading..." }
 .wrap .z-20 svg { display:none!important; }
 .wrap .z-20::before { content:"Loading..." }
+.wrap.cover-bg .z-20::before { content:"" }
 .progress-bar { display:none!important; }
 .meta-text { display:none!important; }
 .meta-text-center { display:none!important; }
@@ -1205,10 +1206,19 @@ def create_ui():
             outputs=[html, generation_info, html2],
         )
 
+    def update_interp_description(value):
+        interp_description_css = "<p style='margin-bottom: 2.5em'>{}</p>"
+        interp_descriptions = {
+            "No interpolation": interp_description_css.format("No interpolation will be used. Requires one model; A. Allows for format conversion and VAE baking."),
+            "Weighted sum": interp_description_css.format("A weighted sum will be used for interpolation. Requires two models; A and B. The result is calculated as A * (1 - M) + B * M"),
+            "Add difference": interp_description_css.format("The difference between the last two models will be added to the first. Requires three models; A, B and C. The result is calculated as A + (B - C) * M")
+        }
+        return interp_descriptions[value]
+
     with gr.Blocks(analytics_enabled=False) as modelmerger_interface:
         with gr.Row().style(equal_height=False):
             with gr.Column(variant='compact'):
-                gr.HTML(value="<p style='margin-bottom: 2.5em'>A merger of the two checkpoints will be generated in your <b>checkpoint</b> directory.</p>")
+                interp_description = gr.HTML(value=update_interp_description("Weighted sum"), elem_id="modelmerger_interp_description")
 
                 with FormRow(elem_id="modelmerger_models"):
                     primary_model_name = gr.Dropdown(modules.sd_models.checkpoint_tiles(), elem_id="modelmerger_primary_model_name", label="Primary model (A)")
@@ -1223,6 +1233,7 @@ def create_ui():
                 custom_name = gr.Textbox(label="Custom Name (Optional)", elem_id="modelmerger_custom_name")
                 interp_amount = gr.Slider(minimum=0.0, maximum=1.0, step=0.05, label='Multiplier (M) - set to 0 to get model A', value=0.3, elem_id="modelmerger_interp_amount")
                 interp_method = gr.Radio(choices=["No interpolation", "Weighted sum", "Add difference"], value="Weighted sum", label="Interpolation Method", elem_id="modelmerger_interp_method")
+                interp_method.change(fn=update_interp_description, inputs=[interp_method], outputs=[interp_description])
 
                 with FormRow():
                     checkpoint_format = gr.Radio(choices=["ckpt", "safetensors"], value="ckpt", label="Checkpoint format", elem_id="modelmerger_checkpoint_format")
@@ -1237,6 +1248,9 @@ def create_ui():
                             bake_in_vae = gr.Dropdown(choices=["None"] + list(sd_vae.vae_dict), value="None", label="Bake in VAE", elem_id="modelmerger_bake_in_vae")
                             create_refresh_button(bake_in_vae, sd_vae.refresh_vae_list, lambda: {"choices": ["None"] + list(sd_vae.vae_dict)}, "modelmerger_refresh_bake_in_vae")
 
+                with FormRow():
+                    discard_weights = gr.Textbox(value="", label="Discard weights with matching name", elem_id="modelmerger_discard_weights")
+
                 with gr.Row():
                     modelmerger_merge = gr.Button(elem_id="modelmerger_merge", value="Merge", variant='primary')
 
@@ -1248,7 +1262,7 @@ def create_ui():
         with gr.Row().style(equal_height=False):
             gr.HTML(value="<p style='margin-bottom: 0.7em'>See <b><a href=\"https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/Textual-Inversion\">wiki</a></b> for detailed explanation.</p>")
 
-        with gr.Row().style(equal_height=False):
+        with gr.Row(variant="compact").style(equal_height=False):
             with gr.Tabs(elem_id="train_tabs"):
 
                 with gr.Tab(label="Create embedding"):
@@ -1827,6 +1841,7 @@ def create_ui():
                 checkpoint_format,
                 config_source,
                 bake_in_vae,
+                discard_weights,
             ],
             outputs=[
                 primary_model_name,
@@ -1897,7 +1912,7 @@ def create_ui():
 
         if type(x) == gr.Dropdown:
             def check_dropdown(val):
-                if x.multiselect:
+                if getattr(x, 'multiselect', False):
                     return all([value in x.choices for value in val])
                 else:
                     return val in x.choices
@@ -1914,28 +1929,27 @@ def create_ui():
         with open(ui_config_file, "w", encoding="utf8") as file:
             json.dump(ui_settings, file, indent=4)
 
+    # Required as a workaround for change() event not triggering when loading values from ui-config.json
+    interp_description.value = update_interp_description(interp_method.value)
+
     return demo
 
 
 def reload_javascript():
-    with open(os.path.join(script_path, "script.js"), "r", encoding="utf8") as jsfile:
-        javascript = f'<script>{jsfile.read()}</script>'
+    head = f'<script type="text/javascript" src="file={os.path.abspath("script.js")}"></script>\n'
 
-    scripts_list = modules.scripts.list_scripts("javascript", ".js")
-
-    for basedir, filename, path in scripts_list:
-        with open(path, "r", encoding="utf8") as jsfile:
-            javascript += f"\n<!-- {filename} --><script>{jsfile.read()}</script>"
-
+    inline = f"{localization.localization_js(shared.opts.localization)};"
     if cmd_opts.theme is not None:
-        javascript += f"\n<script>set_theme('{cmd_opts.theme}');</script>\n"
+        inline += f"set_theme('{cmd_opts.theme}');"
 
-    javascript += f"\n<script>{localization.localization_js(shared.opts.localization)}</script>"
+    head += f'<script type="text/javascript">{inline}</script>\n'
+
+    for script in modules.scripts.list_scripts("javascript", ".js"):
+        head += f'<script type="text/javascript" src="file={script.path}"></script>\n'
 
     def template_response(*args, **kwargs):
         res = shared.GradioTemplateResponseOriginal(*args, **kwargs)
-        res.body = res.body.replace(
-            b'</head>', f'{javascript}</head>'.encode("utf8"))
+        res.body = res.body.replace(b'</head>', f'{head}</head>'.encode("utf8"))
         res.init_headers()
         return res
 
