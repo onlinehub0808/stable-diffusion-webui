@@ -14,7 +14,7 @@ import modules.memmon
 import modules.styles
 import modules.devices as devices
 from modules import localization, extensions, script_loading, errors, ui_components, shared_items
-from modules.paths import models_path, script_path
+from modules.paths import models_path, script_path, data_path
 
 
 demo = None
@@ -25,6 +25,7 @@ sd_model_file = os.path.join(script_path, 'model.ckpt')
 default_sd_model_file = sd_model_file
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--data-dir", type=str, default=os.path.dirname(os.path.dirname(os.path.realpath(__file__))), help="base path where all user data is stored",)
 parser.add_argument("--config", type=str, default=sd_default_config, help="path to config which constructs model",)
 parser.add_argument("--ckpt", type=str, default=sd_model_file, help="path to checkpoint of stable diffusion model; if specified, this checkpoint will be added to the list of checkpoints and loaded",)
 parser.add_argument("--ckpt-dir", type=str, default=None, help="Path to directory with stable diffusion checkpoints")
@@ -35,7 +36,7 @@ parser.add_argument("--no-half", action='store_true', help="do not switch the mo
 parser.add_argument("--no-half-vae", action='store_true', help="do not switch the VAE model to 16-bit floats")
 parser.add_argument("--no-progressbar-hiding", action='store_true', help="do not hide progressbar in gradio UI (we hide it because it slows down ML if you have hardware acceleration in browser)")
 parser.add_argument("--max-batch-count", type=int, default=16, help="maximum batch count value for the UI")
-parser.add_argument("--embeddings-dir", type=str, default=os.path.join(script_path, 'embeddings'), help="embeddings directory for textual inversion (default: embeddings)")
+parser.add_argument("--embeddings-dir", type=str, default=os.path.join(data_path, 'embeddings'), help="embeddings directory for textual inversion (default: embeddings)")
 parser.add_argument("--textual-inversion-templates-dir", type=str, default=os.path.join(script_path, 'textual_inversion_templates'), help="directory with textual inversion templates")
 parser.add_argument("--hypernetwork-dir", type=str, default=os.path.join(models_path, 'hypernetworks'), help="hypernetwork directory")
 parser.add_argument("--localizations-dir", type=str, default=os.path.join(script_path, 'localizations'), help="localizations directory")
@@ -74,16 +75,16 @@ parser.add_argument("--use-cpu", nargs='+', help="use CPU as torch device for sp
 parser.add_argument("--listen", action='store_true', help="launch gradio with 0.0.0.0 as server name, allowing to respond to network requests")
 parser.add_argument("--port", type=int, help="launch gradio with given server port, you need root/admin rights for ports < 1024, defaults to 7860 if available", default=None)
 parser.add_argument("--show-negative-prompt", action='store_true', help="does not do anything", default=False)
-parser.add_argument("--ui-config-file", type=str, help="filename to use for ui configuration", default=os.path.join(script_path, 'ui-config.json'))
+parser.add_argument("--ui-config-file", type=str, help="filename to use for ui configuration", default=os.path.join(data_path, 'ui-config.json'))
 parser.add_argument("--hide-ui-dir-config", action='store_true', help="hide directory configuration from webui", default=False)
 parser.add_argument("--freeze-settings", action='store_true', help="disable editing settings", default=False)
-parser.add_argument("--ui-settings-file", type=str, help="filename to use for ui settings", default=os.path.join(script_path, 'config.json'))
+parser.add_argument("--ui-settings-file", type=str, help="filename to use for ui settings", default=os.path.join(data_path, 'config.json'))
 parser.add_argument("--gradio-debug",  action='store_true', help="launch gradio with --debug option")
 parser.add_argument("--gradio-auth", type=str, help='set gradio authentication like "username:password"; or comma-delimit multiple like "u1:p1,u2:p2,u3:p3"', default=None)
 parser.add_argument("--gradio-img2img-tool", type=str, help='does not do anything')
 parser.add_argument("--gradio-inpaint-tool", type=str, help="does not do anything")
 parser.add_argument("--opt-channelslast", action='store_true', help="change memory type for stable diffusion to channels last")
-parser.add_argument("--styles-file", type=str, help="filename to use for styles", default=os.path.join(script_path, 'styles.csv'))
+parser.add_argument("--styles-file", type=str, help="filename to use for styles", default=os.path.join(data_path, 'styles.csv'))
 parser.add_argument("--autolaunch", action='store_true', help="open the webui URL in the system's default browser upon launch", default=False)
 parser.add_argument("--theme", type=str, help="launches the UI with light or dark theme", default=None)
 parser.add_argument("--use-textbox-seed", action='store_true', help="use textbox for seeds in UI (no up/down, but possible to input long seeds)", default=False)
@@ -127,12 +128,13 @@ restricted_opts = {
 ui_reorder_categories = [
     "inpaint",
     "sampler",
+    "checkboxes",
+    "hires_fix",
     "dimensions",
     "cfg",
     "seed",
-    "checkboxes",
-    "hires_fix",
     "batch",
+    "override_settings",
     "scripts",
 ]
 
@@ -346,10 +348,10 @@ options_templates.update(options_section(('saving-paths', "Paths for saving"), {
 }))
 
 options_templates.update(options_section(('saving-to-dirs', "Saving to a directory"), {
-    "save_to_dirs": OptionInfo(False, "Save images to a subdirectory"),
-    "grid_save_to_dirs": OptionInfo(False, "Save grids to a subdirectory"),
+    "save_to_dirs": OptionInfo(True, "Save images to a subdirectory"),
+    "grid_save_to_dirs": OptionInfo(True, "Save grids to a subdirectory"),
     "use_save_to_dirs_for_ui": OptionInfo(False, "When using \"Save\" button, save images to a subdirectory"),
-    "directories_filename_pattern": OptionInfo("", "Directory name pattern", component_args=hide_dirs),
+    "directories_filename_pattern": OptionInfo("[date]", "Directory name pattern", component_args=hide_dirs),
     "directories_max_prompt_words": OptionInfo(8, "Max prompt words for [prompt_words] pattern", gr.Slider, {"minimum": 1, "maximum": 20, "step": 1, **hide_dirs}),
 }))
 
@@ -405,7 +407,6 @@ options_templates.update(options_section(('sd', "Stable Diffusion"), {
     "enable_batch_seeds": OptionInfo(True, "Make K-diffusion samplers produce same images in a batch as when making a single image"),
     "comma_padding_backtrack": OptionInfo(20, "Increase coherency by padding from the last comma within n tokens when using more than 75 tokens", gr.Slider, {"minimum": 0, "maximum": 74, "step": 1 }),
     "CLIP_stop_at_last_layers": OptionInfo(1, "Clip skip", gr.Slider, {"minimum": 1, "maximum": 12, "step": 1}),
-    "extra_networks_default_multiplier": OptionInfo(1.0, "Multiplier for extra networks", gr.Slider, {"minimum": 0.0, "maximum": 1.0, "step": 0.01}),
     "upcast_attn": OptionInfo(False, "Upcast cross attention layer to float32"),
 }))
 
@@ -431,7 +432,9 @@ options_templates.update(options_section(('interrogate', "Interrogate Options"),
 }))
 
 options_templates.update(options_section(('extra_networks', "Extra Networks"), {
-    "extra_networks_default_view": OptionInfo("cards", "Default view for Extra Networks", gr.Dropdown, { "choices": ["cards", "thumbs"] }),
+    "extra_networks_default_view": OptionInfo("cards", "Default view for Extra Networks", gr.Dropdown, {"choices": ["cards", "thumbs"]}),
+    "extra_networks_default_multiplier": OptionInfo(1.0, "Multiplier for extra networks", gr.Slider, {"minimum": 0.0, "maximum": 1.0, "step": 0.01}),
+    "sd_hypernetwork": OptionInfo("None", "Add hypernetwork to prompt", gr.Dropdown, lambda: {"choices": [""] + [x for x in hypernetworks.keys()]}, refresh=reload_hypernetworks),
 }))
 
 options_templates.update(options_section(('ui', "User interface"), {
@@ -439,7 +442,7 @@ options_templates.update(options_section(('ui', "User interface"), {
     "do_not_show_images": OptionInfo(False, "Do not show any images in results for web"),
     "add_model_hash_to_info": OptionInfo(True, "Add model hash to generation information"),
     "add_model_name_to_info": OptionInfo(True, "Add model name to generation information"),
-    "disable_weights_auto_swap": OptionInfo(False, "When reading generation parameters from text into UI (from PNG info or pasted text), do not change the selected model/checkpoint."),
+    "disable_weights_auto_swap": OptionInfo(True, "When reading generation parameters from text into UI (from PNG info or pasted text), do not change the selected model/checkpoint."),
     "send_seed": OptionInfo(True, "Send seed when sending prompt or image to other interface"),
     "send_size": OptionInfo(True, "Send size when sending prompt or image to another interface"),
     "font": OptionInfo("", "Font for image grids that have text"),
@@ -604,10 +607,36 @@ class Options:
 
         self.data_labels = {k: v for k, v in sorted(settings_items, key=lambda x: section_ids[x[1].section])}
 
+    def cast_value(self, key, value):
+        """casts an arbitrary to the same type as this setting's value with key
+        Example: cast_value("eta_noise_seed_delta", "12") -> returns 12 (an int rather than str)
+        """
+
+        if value is None:
+            return None
+
+        default_value = self.data_labels[key].default
+        if default_value is None:
+            default_value = getattr(self, key, None)
+        if default_value is None:
+            return None
+
+        expected_type = type(default_value)
+        if expected_type == bool and value == "False":
+            value = False
+        else:
+            value = expected_type(value)
+
+        return value
+
+
 
 opts = Options()
 if os.path.exists(config_filename):
     opts.load(config_filename)
+
+settings_components = None
+"""assinged from ui.py, a mapping on setting anmes to gradio components repsponsible for those settings"""
 
 latent_upscale_default_mode = "Latent"
 latent_upscale_modes = {

@@ -17,6 +17,37 @@ stored_commit_hash = None
 skip_install = False
 
 
+def check_python_version():
+    is_windows = platform.system() == "Windows"
+    major = sys.version_info.major
+    minor = sys.version_info.minor
+    micro = sys.version_info.micro
+
+    if is_windows:
+        supported_minors = [10]
+    else:
+        supported_minors = [7, 8, 9, 10, 11]
+
+    if not (major == 3 and minor in supported_minors):
+        import modules.errors
+
+        modules.errors.print_error_explanation(f"""
+INCOMPATIBLE PYTHON VERSION
+
+This program is tested with 3.10.6 Python, but you have {major}.{minor}.{micro}.
+If you encounter an error with "RuntimeError: Couldn't install torch." message,
+or any other error regarding unsuccessful package (library) installation,
+please downgrade (or upgrade) to the latest version of 3.10 Python
+and delete current Python and "venv" folder in WebUI's directory.
+
+You can download 3.10 Python from here: https://www.python.org/downloads/release/python-3109/
+
+{"Alternatively, use a binary release of WebUI: https://github.com/AUTOMATIC1111/stable-diffusion-webui/releases" if is_windows else ""}
+
+Use --skip-python-version-check to suppress this warning.
+""")
+
+
 def commit_hash():
     global stored_commit_hash
 
@@ -192,6 +223,7 @@ def prepare_environment():
     requirements_file = os.environ.get('REQS_FILE', "requirements_versions.txt")
     commandline_args = os.environ.get('COMMANDLINE_ARGS', "")
 
+    xformers_package = os.environ.get('XFORMERS_PACKAGE', 'xformers==0.0.16rc425')
     gfpgan_package = os.environ.get('GFPGAN_PACKAGE', "git+https://github.com/TencentARC/GFPGAN.git@8d2447a2d918f8eba5a4a01463fd48e45126a379")
     clip_package = os.environ.get('CLIP_PACKAGE', "git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1")
     openclip_package = os.environ.get('OPENCLIP_PACKAGE', "git+https://github.com/mlfoundations/open_clip.git@bb6e834e9c70d9c27d0dc3ecedeebeaeb1ffad6b")
@@ -216,6 +248,7 @@ def prepare_environment():
 
     sys.argv, _ = extract_arg(sys.argv, '-f')
     sys.argv, skip_torch_cuda_test = extract_arg(sys.argv, '--skip-torch-cuda-test')
+    sys.argv, skip_python_version_check = extract_arg(sys.argv, '--skip-python-version-check')
     sys.argv, reinstall_xformers = extract_arg(sys.argv, '--reinstall-xformers')
     sys.argv, reinstall_torch = extract_arg(sys.argv, '--reinstall-torch')
     sys.argv, update_check = extract_arg(sys.argv, '--update-check')
@@ -223,6 +256,9 @@ def prepare_environment():
     sys.argv, skip_install = extract_arg(sys.argv, '--skip-install')
     xformers = '--xformers' in sys.argv
     ngrok = '--ngrok' in sys.argv
+
+    if not skip_python_version_check:
+        check_python_version()
 
     commit = commit_hash()
 
@@ -247,7 +283,7 @@ def prepare_environment():
     if (not is_installed("xformers") or reinstall_xformers) and xformers:
         if platform.system() == "Windows":
             if platform.python_version().startswith("3.10"):
-                run_pip(f"install -U -I --no-deps xformers==0.0.16rc425", "xformers")
+                run_pip(f"install -U -I --no-deps {xformers_package}", "xformers")
             else:
                 print("Installation of xformers is not supported in this version of Python.")
                 print("You can also check this and build manually: https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/Xformers#building-xformers-on-windows-by-duckness")
