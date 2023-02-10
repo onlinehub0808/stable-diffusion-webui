@@ -8,6 +8,7 @@ numpy==1.23.3
 Pillow==9.4.0
 realesrgan==0.3.0
 torch
+fastapi==0.90.0
 omegaconf==2.2.3
 pytorch_lightning==1.7.6
 scikit-image==0.19.2
