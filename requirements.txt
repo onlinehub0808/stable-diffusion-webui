@@ -5,7 +5,7 @@ fonts
 font-roboto
 gfpgan
 gradio==3.16.2
-fastapi
+fastapi==0.90.0
 invisible-watermark
 numpy
 omegaconf
